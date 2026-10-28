@@ -1,0 +1,120 @@
+# G5 Architecture — config v0 (week 1, due Tue 27 Oct)
+# Every setting has a default AND a source comment. Size values stay TBD until TSAI (31 Oct).
+# Convention enforced by harness/check_config.py: each key needs a `# source:` comment
+# on its own line or the line(s) directly above it, and a non-empty value
+# (size keys may be TBD until 31 Oct: pass them to the checker with `--allow-tbd <key> ...`).
+
+# source: G5 week-1 gate (24 Oct brief) — this file blocks G7, due 27 Oct
+stage: tiny-determinism-gate
+
+# source: stage ladder per brief (1B dense -> 3B MoE -> 8B -> 120B); lr_schedule.yaml ends at 70B. Week-1 runs the tiny gate only
+model:
+  # source: kronecker-embeddings paper sec 6.9 Table 11 — GPT-2 124M reference setting (V=50257, d_model=768)
+  base: gpt2
+  # source: G5 25 Oct sync — MICRO gate config for 26 Oct meet (CPU, minutes); scale to GPT-2 124M (12/768/12) on GPU after
+  n_layer: 2
+  # source: G5 25 Oct sync — micro (124M uses 768)
+  n_embd: 128
+  # source: G5 25 Oct sync — micro (124M uses 12)
+  n_head: 2
+  # source: G5 25 Oct sync — tiny MoE required by week-1 gate. ASSUMPTION: V5 is expected to be a MoE; not yet decided by the team
+  moe:
+    # source: G5 25 Oct sync decision
+    enabled: true
+    # source: G5 default, swept in plan_v0 arm M-4/8
+    n_experts: 4
+    # source: G5 default, swept in plan_v0 arm M-4/8
+    top_k: 1
+  # source: train_1b_prod.yaml key model.embedding_type (kronecker) + G5 25 Oct sync — Kronecker block (see type below)
+  embedding:
+    # source: train_1b_prod.yaml key model.embedding_type (kronecker) + G5 25 Oct sync — Kronecker mandatory throughout; standard-embedding results do not carry over
+    type: kronecker
+    # source: kronecker-embeddings README quickstart — pip package `kronecker-embeddings`, class KroneckerEmbedding, drop-in for nn.Embedding
+    package: kronecker-embeddings
+    # source: G5 micro gate value; kronecker-embeddings paper sec 6.9 uses 16 (char_dim=256, pos_dim=16 -> D=4096)
+    pos_dim: 8
+    # source: kronecker-embeddings README (D = char_dim x pos_dim; char_dim=256 bytes)
+    char_dim: 256
+
+# source: G5 25 Oct sync — mixed Indic+English, never Wikitext-only (V4 incident when Indic arrived late: from the brief, no file)
+data:
+  # source: XNLI test (facebook/xnli, verified 25 Oct: 5010 human-translated parallel pairs, en+hi per row) built by data/make_mixed_sample.py; NOT committed, regenerate on instance
+  train_sample: data/mixed_en_hi_xnli.txt
+  # source: XNLI rows are parallel en/hi by construction — interleave 1:1
+  mix_en_hi: 0.5
+  # source: two V4 readings differ. curriculum_v2.yaml (aon_config.injection_rate 0.25, internal_split.indic_guaranteed 0.50) gives Always-ON = 25% of the batch with half Indic = 12.5% Indic. train_1b_prod.yaml key opus.aon_per_step (2, its comment: doubles AON to 50% of batch) gives 25% Indic + 25% bench. The value 0.25 follows the train_1b_prod.yaml reading (25% Indic). Not read by train.py.
+  always_on_indic_frac: 0.25
+  # source: G4 input due 27 Oct — KE2 output shape plugs in here
+  ke2_shape_tbd: TBD
+  # source: TSAI 31 Oct — model/data size values frozen here
+  size_tbd_1: TBD
+  # source: TSAI 31 Oct — model/data size values frozen here
+  size_tbd_2: TBD
+
+# source: none / G5 gate value — held-out eval request, 25 Oct (not in any V4 file)
+eval:
+  # source: none / G5 gate value; eval runs after step 0, every N completed steps, and after the final step
+  every_steps: 10
+  # source: XNLI validation split (facebook/xnli, 2490 rows, en+hi) built by data/make_mixed_sample.py --split validation; NOT committed
+  data: data/mixed_en_hi_xnli_val.txt
+
+# source: G5 week-1 gate — training loop settings for the determinism gate
+# Gate mirrors V4 stage 3B_MOE_PRODUCTION (lr_schedule.yaml): peak lr 1e-4, weight_decay 0.0.
+# ASSUMPTION: V5 is a MoE, not yet decided by the team. Warmup is scaled down for the gate.
+# V4's dense 1B stage uses lr 2e-4, wd 0.1, warmup 4000.
+training:
+  # source: G5 week-1 gate — seed 1234 must give identical loss every run (empty diff); train_1b_prod.yaml key training.seed is 1337, gate pins 1234
+  seed: 1234
+  # source: G5 25 Oct sync — micro steps for the determinism gate; real budgets per stage come from TSAI
+  max_steps: 20
+  # source: G5 25 Oct sync — micro batch/seq for CPU gate
+  batch: 2
+  # source: G5 25 Oct sync — micro batch/seq for CPU gate (train_1b_prod.yaml key data.max_length is 4096)
+  seq_len: 32
+  # source: zero-1-1b.json key optimizer.type (adamw); Muon is the week-2 alternative (group notes, no file)
+  optimizer: adamw
+  # source: lr_schedule.yaml stage 3B_MOE_PRODUCTION key peak_lr (1.0e-4)
+  lr: 1.0e-4
+  # source: train_1b_prod.yaml header comment 'LR: peak=2e-4, warmup=4000, cosine -> 1e-5' (a comment, not a key; V4 1B run); lr_schedule.yaml gives only peak_lr/decay_ratio, the decay shape is not stated there. Not read by train.py (cosine is hard-coded)
+  lr_schedule: cosine
+  # source: lr_schedule.yaml stage 3B_MOE_PRODUCTION: decay_ratio 10 -> end_lr = peak_lr / 10 = 1e-5
+  lr_min: 1.0e-5
+  # source: none / G5 gate value. Production stage 3B_MOE_PRODUCTION (lr_schedule.yaml) uses warmup_hold_steps 1000 (flat 1e-5, routing settle) then warmup_steps 2000 (ramp 1e-5 -> 1e-4); that cannot fit a 20-step gate. Hold phase not implemented. V4 dense 1B stage uses warmup_steps 4000
+  warmup_steps: 10
+  # source: lr_schedule.yaml stage 3B_MOE_PRODUCTION key weight_decay (0.0); V4 dense 1B stage has 0.1
+  weight_decay: 0.0
+  # source: zero-1-1b.json and zero-1-120b-tqlora.json key gradient_clipping (1.0 in both)
+  grad_clip: 1.0
+  # source: zero-1-1b.json optimizer.params.betas[0] (0.9)
+  adam_beta1: 0.9
+  # source: zero-1-1b.json optimizer.params.betas[1] (0.95)
+  adam_beta2: 0.95
+  # source: zero-1-1b.json optimizer.params.eps (1e-10)
+  adam_eps: 1.0e-10
+  # source: G5 25 Oct sync — NTP now; MTP joins when the dashboard/plumbing lands
+  loss: ntp
+  # source: V4 1B uses ZeRO-1 (zero-1-1b.json, key zero_optimization.stage); train_1b_prod.yaml key deepspeed.config_path names zero-3-1b.json (that file not shared). Our value 3 is a G5 member instruction, 25 Oct: a plumbing check on a tiny model, not a V4 setting. Not read by train.py (DeepSpeed settings live in deepspeed/zero3_4gpu.json)
+  deepspeed_zero: 3
+  # source: V4 dashboard metric list (25 Oct sync) — starting metric names for G8 (logger/alarms land 29 Oct)
+  log_metrics:
+    - tokens_per_second
+    - loss_ntp
+    - loss
+    - lr
+    - gpu_alloc_gb
+  # source: train_1b_prod.yaml key spot_checkpoint.checkpoint_interval_steps (780); checkpoint.checkpoint_interval is null there. Not read by train.py
+  # source: train_1b_prod.yaml key checkpoint.keep_last_n_checkpoints (3). Not read by train.py
+  # source: train_1b_prod.yaml block opus (parameters below); curriculum_v2.yaml pools.DROPPED (B2 dropped: 18.7% cross-doc leakage, 9.14% garbage, 15.69% repetition). The V4 8B failure (3 days lost) is from the brief, no file
+  opus:
+    # source: G5 gate default; no group decision recorded. train_1b_prod.yaml key opus.enabled is true in production
+    enabled: false
+    # source: train_1b_prod.yaml key opus.active_fraction (1.0)
+    active_frac: 1.0
+    # source: train_1b_prod.yaml key opus.score_seq_len (512)
+    score_seq_len: 512
+    # source: train_1b_prod.yaml key opus.sketch_dim (8192)
+    sketch_dim: 8192
+    # source: train_1b_prod.yaml key opus.selection_ratio (0.5)
+    selection_ratio: 0.5
+    # source: train_1b_prod.yaml key opus.temperature (1.0)
+    temperature: 1.0
