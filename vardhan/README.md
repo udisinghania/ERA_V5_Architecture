@@ -70,6 +70,20 @@ for the detail. The three things worth acting on:
 3. **One folder has no run evidence at all** — no loss files anywhere, so the
    matching-seed and falling-loss claims cannot be checked.
 
+## `metrics/CONTRACT.md` — the six G8 names, reconciled
+
+`verify/metrics_contract.py` does for the metric handoff what `gate1.py` does
+for the Saturday gate: it reads every folder's `metrics.jsonl` and reports, per
+member, which of the six names G8 was promised are present, what each is
+renamed to, and one semantic the names do not settle — whether `loss` is the
+optimized total or the next-token component. Five folders log the total; the
+skeleton in PR #67 logs the NTP component. `metrics/CONTRACT.md` is the single
+mapping G8 wires against on 29 Oct, with that decision called out.
+
+```bash
+python verify/metrics_contract.py --all ..
+```
+
 ## Diagnosis
 
 My pack is `ind-mr-fw2`. Rows live in the lab repo, not here:
